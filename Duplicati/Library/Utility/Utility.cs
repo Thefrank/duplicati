@@ -846,13 +846,14 @@ namespace Duplicati.Library.Utility
 
         [SupportedOSPlatform("linux")]
         [SupportedOSPlatform("macos")]
+        [SupportedOSPlatform("freebsd")]
         /// <summary>
         /// Invokes the &quot;which&quot; command to determine if a given application is available in the path
         /// </summary>
         /// <param name="appname">The name of the application to look for</param>
         public static bool Which(string appname)
         {
-            if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
+            if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsFreeBSD()))
                 return false;
 
             try

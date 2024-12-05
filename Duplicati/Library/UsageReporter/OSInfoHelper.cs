@@ -160,7 +160,7 @@ namespace Duplicati.Library.UsageReporter
                 }
 
                 // This should work on all Linux/BSD based systems
-                if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsFreeBSD())
                     return CachedPlatformString = RunProgramAndReadOutput("uname", "-srvmp");
 
                 if (OperatingSystem.IsWindows())

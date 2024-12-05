@@ -34,6 +34,7 @@ namespace Duplicati.Library.Common.IO
 
         [SupportedOSPlatform("linux")]
         [SupportedOSPlatform("macOS")]
+        [SupportedOSPlatform("freebsd")]
         public static readonly ISystemIO IO_SYS;
 
         public static readonly ISystemIO IO_OS;
@@ -53,7 +54,7 @@ namespace Duplicati.Library.Common.IO
             {
                 IO_OS = IO_WIN;
             }
-            else if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+            else if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() || OperatingSystem.IsFreeBSD())
             {
                 IO_OS = IO_SYS;
             }

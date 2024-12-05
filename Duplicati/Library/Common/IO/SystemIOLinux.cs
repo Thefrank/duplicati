@@ -30,6 +30,7 @@ namespace Duplicati.Library.Common.IO
 {
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macOS")]
+    [SupportedOSPlatform("freebsd")]
     public struct SystemIOLinux : ISystemIO
     {
         #region ISystemIO implementation

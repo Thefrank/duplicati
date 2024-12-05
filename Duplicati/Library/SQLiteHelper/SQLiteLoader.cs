@@ -232,7 +232,7 @@ namespace Duplicati.Library.SQLiteHelper
 
 
             // If we are non-Windows, make the file only accessible by the current user
-            if ((OperatingSystem.IsMacOS() || OperatingSystem.IsLinux()) && !fileExists)
+            if ((OperatingSystem.IsMacOS() || OperatingSystem.IsLinux()) || OperatingSystem.IsFreeBSD()) && !fileExists)
                 SetUnixPermissionUserRWOnly(path);
         }
 
@@ -244,6 +244,7 @@ namespace Duplicati.Library.SQLiteHelper
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         [SupportedOSPlatform("linux")]
         [SupportedOSPlatform("macOS")]
+        [SupportedOSPlatform("freebsd")]
         private static void SetUnixPermissionUserRWOnly(string path)
         {
             var fi = PosixFile.GetUserGroupAndPermissions(path);

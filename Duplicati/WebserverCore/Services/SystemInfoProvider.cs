@@ -198,7 +198,7 @@ public class SystemInfoProvider : ISystemInfoProvider
         StartedBy = FIXMEGlobal.Origin,
         DefaultUpdateChannel = Library.AutoUpdater.AutoUpdateSettings.DefaultUpdateChannel.ToString(),
         DefaultUsageReportLevel = Library.UsageReporter.Reporter.DefaultReportLevel,
-        OSType = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsLinux() ? "Linux" : OperatingSystem.IsMacOS() ? "MacOS" : "Unknown",
+        OSType = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsLinux() ? "Linux" : OperatingSystem.IsMacOS() ? "MacOS" : OperatingSystem.IsFreeBSD() ? "FreeBSD" : "Unknown",
         OSVersion = Library.UsageReporter.OSInfoHelper.PlatformString,
         DirectorySeparator = Path.DirectorySeparatorChar,
         PathSeparator = Path.PathSeparator,

@@ -88,7 +88,7 @@ namespace Duplicati.Library.Main.Operation
                     Logging.Log.WriteInformationMessage(LOGTAG, "SnapshotFailed", Strings.Common.SnapshotFailedError(ex.Message));
             }
 
-            if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() || OperatingSystem.IsFreeBSD())
             {
                 return new NoSnapshotLinux(options.IgnoreAdvisoryLocking);
             }

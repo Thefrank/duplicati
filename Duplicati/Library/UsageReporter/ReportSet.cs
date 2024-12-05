@@ -55,6 +55,8 @@ namespace Duplicati.Library.UsageReporter
                 Cached_OSType = "Linux";
             else if (OperatingSystem.IsWindows())
                 Cached_OSType = "Windows";
+            else if (OperatingSystem.IsFreeBSD())
+                Cached_OSType = "FreeBSD";
             else
                 Cached_OSType = "Unknown";
 

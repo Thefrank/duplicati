@@ -27,6 +27,7 @@ namespace Duplicati.Library.Common.IO
 {
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macOS")]
+    [SupportedOSPlatform("freebsd")]
     public static class PosixFile
     {
     
