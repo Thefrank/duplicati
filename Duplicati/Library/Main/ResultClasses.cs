@@ -1,22 +1,22 @@
 // Copyright (C) 2024, The Duplicati Team
 // https://duplicati.com, hello@duplicati.com
-// 
-// Permission is hereby granted, free of charge, to any person obtaining a 
-// copy of this software and associated documentation files (the "Software"), 
-// to deal in the Software without restriction, including without limitation 
-// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
-// and/or sell copies of the Software, and to permit persons to whom the 
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
-// The above copyright notice and this permission notice shall be included in 
+//
+// The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-// 
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
-// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
 using System;
@@ -26,6 +26,8 @@ using Duplicati.Library.Main.Database;
 using Duplicati.Library.Logging;
 using System.Linq;
 using Newtonsoft.Json;
+using System.Threading.Tasks;
+using Duplicati.Library.Main.Operation.Common;
 
 namespace Duplicati.Library.Main
 {
@@ -59,6 +61,11 @@ namespace Duplicati.Library.Main
         OperationMode MainOperation { get; }
 
         void SetDatabase(LocalDatabase db);
+    }
+
+    internal interface ITaskControlProvider
+    {
+        ITaskControl TaskControl { get; }
     }
 
     internal class BackendWriter : BasicResults, IBackendWriter, IBackendStatstics, IParsedBackendStatistics
@@ -137,23 +144,8 @@ namespace Duplicati.Library.Main
         IBackendProgressUpdater IBackendWriter.BackendProgressUpdater { get { return base.BackendProgressUpdater; } }
     }
 
-    public interface ITaskControl
-    {
-        void Pause();
-        void Resume();
-        void Stop(bool allowCurrentFileToFinish);
-        void Abort();
-    }
 
-    internal enum TaskControlState
-    {
-        Run,
-        Pause,
-        Stop,
-        Abort
-    }
-
-    internal abstract class BasicResults : IBasicResults, ISetCommonOptions, ITaskControl, Logging.ILogDestination
+    internal abstract class BasicResults : IBasicResults, ISetCommonOptions, Logging.ILogDestination, ITaskControlProvider
     {
         /// <summary>
         /// The tag used for logging
@@ -184,9 +176,6 @@ namespace Duplicati.Library.Main
         protected System.Threading.Thread m_callerThread;
         protected readonly object m_lock = new object();
         protected readonly Queue<DbMessage> m_dbqueue;
-
-        private TaskControlState m_controlState = TaskControlState.Run;
-        private readonly System.Threading.ManualResetEvent m_pauseEvent = new System.Threading.ManualResetEvent(true);
 
         public virtual ParsedResultType ParsedResult
         {
@@ -220,7 +209,7 @@ namespace Duplicati.Library.Main
         protected readonly Library.Utility.FileBackedStringList m_warnings;
         protected readonly Library.Utility.FileBackedStringList m_errors;
         protected Library.Utility.FileBackedStringList m_retryAttempts;
-        
+
         protected IMessageSink m_messageSink;
 
         [JsonIgnore]
@@ -336,7 +325,7 @@ namespace Duplicati.Library.Main
 
         // ReSharper disable once UnusedMember.Global
         // This is referenced in the logs.
-        public int MessagesActualLength { get { return Messages == null ? 0 : Messages.Count();  } }
+        public int MessagesActualLength { get { return Messages == null ? 0 : Messages.Count(); } }
 
         [JsonIgnore]
         public IEnumerable<string> Warnings { get { return m_warnings; } }
@@ -360,8 +349,7 @@ namespace Duplicati.Library.Main
         public IEnumerable<string> LimitedErrors { get { return Errors?.Take(SERIALIZATION_LIMIT); } }
 
         protected readonly Operation.Common.TaskControl m_taskController;
-        public Operation.Common.ITaskReader TaskReader { get { return m_taskController; } }
-
+        public Operation.Common.ITaskControl TaskControl => m_parent?.TaskControl ?? m_taskController;
         protected BasicResults()
         {
             this.BeginTime = DateTime.UtcNow;
@@ -398,131 +386,6 @@ namespace Duplicati.Library.Main
 
         [JsonIgnore]
         public IBackendWriter BackendWriter { get { return (IBackendWriter)this.BackendStatistics; } }
-
-        public event Action<TaskControlState> StateChangedEvent;
-
-        /// <summary>
-        /// Request that this task pauses.
-        /// </summary>
-        public void Pause()
-        {
-            if (m_parent != null)
-                m_parent.Pause();
-            else
-            {
-                lock (m_lock)
-                    if (m_controlState == TaskControlState.Run)
-                    {
-                        m_pauseEvent.Reset();
-                        m_controlState = TaskControlState.Pause;
-                    }
-
-                if (StateChangedEvent != null)
-                    StateChangedEvent(m_controlState);
-            }
-        }
-
-        /// <summary>
-        /// Request that this task resumes.
-        /// </summary>
-        public void Resume()
-        {
-            if (m_parent != null)
-                m_parent.Resume();
-            else
-            {
-                lock (m_lock)
-                    if (m_controlState == TaskControlState.Pause)
-                    {
-                        m_pauseEvent.Set();
-                        m_controlState = TaskControlState.Run;
-                    }
-
-                if (StateChangedEvent != null)
-                    StateChangedEvent(m_controlState);
-            }
-        }
-
-        /// <summary>
-        /// Request that this task stops.
-        /// </summary>
-        public void Stop(bool allowCurrentFileToFinish)
-        {
-            if (m_parent != null)
-                m_parent.Stop(allowCurrentFileToFinish);
-            else
-            {
-                lock (m_lock)
-                    if (m_controlState != TaskControlState.Abort)
-                    {
-                        m_controlState = TaskControlState.Stop;
-                        m_pauseEvent.Set();
-                        if (!allowCurrentFileToFinish)
-                        {
-                            m_taskController.Stop(true);
-                        }
-                    }
-
-                if (StateChangedEvent != null)
-                    StateChangedEvent(m_controlState);
-            }
-        }
-
-        /// <summary>
-        /// Request that this task aborts.
-        /// </summary>
-        public void Abort()
-        {
-            if (m_parent != null)
-                m_parent.Abort();
-            else
-            {
-                lock (m_lock)
-                {
-                    m_controlState = TaskControlState.Abort;
-                    m_pauseEvent.Set();
-                }
-
-                if (StateChangedEvent != null)
-                    StateChangedEvent(m_controlState);
-            }
-        }
-
-        /// <summary>
-        /// Helper method that the current running task can call to obtain the current state
-        /// </summary>
-        public TaskControlState TaskControlRendevouz()
-        {
-            if (m_parent != null)
-                return m_parent.TaskControlRendevouz();
-            else
-            {
-                // If we are paused, go into pause mode
-                m_pauseEvent.WaitOne();
-
-                // If we are aborted, throw exception
-                if (m_controlState == TaskControlState.Abort)
-                {
-                    System.Threading.Thread.CurrentThread.Interrupt();
-
-                    // For some reason, aborting the current thread does not always throw an exception
-                    throw new CancelException();
-                }
-
-                return m_controlState;
-            }
-        }
-
-        /// <summary>
-        /// Helper method to check if abort is requested
-        /// </summary>
-        public bool IsAbortRequested()
-        {
-            if (m_parent != null)
-                return m_parent.IsAbortRequested();
-            else
-                return m_controlState == TaskControlState.Abort;
-        }
 
         /// <summary>
         /// Returns a <see cref="System.String"/> that represents the current <see cref="Duplicati.Library.Main.BasicResults"/>.
@@ -610,19 +473,19 @@ namespace Duplicati.Library.Main
                     return ParsedResultType.Fatal;
                 }
                 else if ((CompactResults != null && CompactResults.ParsedResult == ParsedResultType.Error) ||
-                    (VacuumResults  != null && VacuumResults.ParsedResult  == ParsedResultType.Error) ||
-                    (DeleteResults  != null && DeleteResults.ParsedResult  == ParsedResultType.Error) ||
-                    (RepairResults  != null && RepairResults.ParsedResult  == ParsedResultType.Error) || 
-                    (TestResults    != null && TestResults.ParsedResult    == ParsedResultType.Error) ||
+                    (VacuumResults != null && VacuumResults.ParsedResult == ParsedResultType.Error) ||
+                    (DeleteResults != null && DeleteResults.ParsedResult == ParsedResultType.Error) ||
+                    (RepairResults != null && RepairResults.ParsedResult == ParsedResultType.Error) ||
+                    (TestResults != null && TestResults.ParsedResult == ParsedResultType.Error) ||
                     (Errors != null && Errors.Any()) || FilesWithError > 0)
                 {
                     return ParsedResultType.Error;
                 }
                 else if ((CompactResults != null && CompactResults.ParsedResult == ParsedResultType.Warning) ||
-                         (VacuumResults  != null && VacuumResults.ParsedResult  == ParsedResultType.Warning) ||
-                         (DeleteResults  != null && DeleteResults.ParsedResult  == ParsedResultType.Warning) ||
-                         (RepairResults  != null && RepairResults.ParsedResult  == ParsedResultType.Warning) ||
-                         (TestResults    != null && TestResults.ParsedResult    == ParsedResultType.Warning) ||
+                         (VacuumResults != null && VacuumResults.ParsedResult == ParsedResultType.Warning) ||
+                         (DeleteResults != null && DeleteResults.ParsedResult == ParsedResultType.Warning) ||
+                         (RepairResults != null && RepairResults.ParsedResult == ParsedResultType.Warning) ||
+                         (TestResults != null && TestResults.ParsedResult == ParsedResultType.Warning) ||
                          (Warnings != null && Warnings.Any()) || PartialBackup)
                 {
                     return ParsedResultType.Warning;
@@ -637,6 +500,14 @@ namespace Duplicati.Library.Main
 
     internal class RestoreResults : BasicResults, Library.Interface.IRestoreResults
     {
+        /// <summary>
+        /// The list of broken local files - i.e. locally stored files that raised an error during restore.
+        /// </summary>
+        public Library.Utility.FileBackedStringList BrokenLocalFiles { get; internal set; } = [];
+        /// <summary>
+        /// The list of broken remote files - i.e. remotely stored files that raised an error during restore.
+        /// </summary>
+        public Library.Utility.FileBackedStringList BrokenRemoteFiles { get; internal set; } = [];
         public long RestoredFiles { get; internal set; }
         public long SizeOfRestoredFiles { get; internal set; }
         public long RestoredFolders { get; internal set; }

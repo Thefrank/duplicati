@@ -95,12 +95,15 @@ namespace Duplicati.Library.Main.Strings
         public static string SkipfileslargerthanShort { get { return LC.L(@"Limit the size of files being backed up"); } }
         public static string TempdirLong { get { return LC.L(@"Use this option to supply an alternative folder for temporary storage. By default the system default temporary folder is used. Note that also SQLite will put temporary files in this temporary folder."); } }
         public static string TempdirShort { get { return LC.L(@"Temporary storage folder"); } }
+        public static string ThreadpriorityDeprecated { get { return LC.L(@"The option --thread-priority has no effect, use the operating system controls to set the process priority"); } }
         public static string ThreadpriorityLong { get { return LC.L(@"Select another thread priority for the process. Use this to set Duplicati to be more or less CPU intensive."); } }
         public static string ThreadpriorityShort { get { return LC.L(@"Thread priority"); } }
         public static string DblocksizeLong { get { return LC.L(@"This option can change the maximum size of dblock files. Changing the size can be useful if the backend has a limit on the size of each individual file."); } }
         public static string DblocksizeShort { get { return LC.L(@"Limit the size of the volumes"); } }
         public static string DisableStreamingLong { get { return LC.L(@"Use this option to disallow usage of the streaming interface, which means that transfer progress bars will not show, and bandwidth throttle settings will be ignored."); } }
         public static string DisableStreamingShort { get { return LC.L(@"Disable use of the streaming transfer method"); } }
+        public static string ReadWriteTimeoutShort { get { return LC.L(@"Set the read/write timeout for the connection"); } }
+        public static string ReadWriteTimeoutLong { get { return LC.L(@"The read/write timeout is the maximum amount of time to wait for any activity during a transfer. If no activity is detected for this period, the connection is considered broken and the transfer is aborted. Set to 0s to disabled"); } }
         public static string DontreadmanifestsLong { get { return LC.L(@"Use this option to make sure the contents of the manifest file are not read. This also implies that file hashes are not checked either. Use only for disaster recovery."); } }
         public static string DontreadmanifestsShort { get { return LC.L(@"Disable manifests verification"); } }
         public static string CompressionmoduleLong { get { return LC.L(@"Duplicati supports pluggable compression modules. Use this option to select a module to use for compression. This is only applied when creating new volumes, when reading an existing file, the filename is used to select the compression module."); } }
@@ -115,7 +118,7 @@ namespace Duplicati.Library.Main.Strings
         public static string SnapshotpolicyShort { get { return LC.L(@"Control the use of disk snapshots"); } }
         public static string AsynchronousuploadfolderLong { get { return LC.L(@"The pre-generated volumes will be placed into the temporary folder by default. This option can set a different folder for placing the temporary volumes. Despite the name, this also works for synchronous runs."); } }
         public static string AsynchronousuploadfolderShort { get { return LC.L(@"The path where ready volumes are placed until uploaded"); } }
-        public static string AsynchronousuploadlimitLong { get { return LC.L(@"When performing asynchronous uploads, Duplicati will create volumes that can be uploaded. To prevent Duplicati from generating too many volumes, this option limits the number of pending uploads. Set to zero to disable the limit."); } }
+        public static string AsynchronousuploadlimitLong { get { return LC.L(@"When performing asynchronous uploads, Duplicati will create volumes that can be uploaded. To prevent Duplicati from generating too many volumes, this option limits the number of pending uploads. Set to zero to disable the limit.  The volume(s) that are being created are not counted in this limit. Use the option --concurrency-compressors=1 to limit the number of volumes being created."); } }
         public static string AsynchronousuploadlimitShort { get { return LC.L(@"The number of volumes to create ahead of time"); } }
         public static string AsynchronousconcurrentuploadlimitLong { get { return LC.L(@"When performing asynchronous uploads, the maximum number of concurrent uploads allowed. Set to zero to disable the limit."); } }
         public static string AsynchronousconcurrentuploadlimitShort { get { return LC.L(@"The number of concurrent uploads allowed"); } }
@@ -138,7 +141,7 @@ namespace Duplicati.Library.Main.Strings
         public static string DisabletimetoleranceShort { get { return LC.L(@"Deactivate tolerance when comparing times"); } }
         public static string ListverifyuploadsLong { get { return LC.L(@"Use this option to verify uploads by listing contents."); } }
         public static string ListverifyuploadsShort { get { return LC.L(@"Verify uploads by listing contents"); } }
-        public static string SynchronousuploadLong { get { return LC.L(@"Duplicati will upload files while scanning the disk and producing volumes, which usually makes the backup faster. Use this option to turn the behavior off, so that Duplicati will wait for each volume to complete."); } }
+        public static string SynchronousuploadLong { get { return LC.L(@"Disables uploading multiple files concurrently to preserve bandwith. This will have the same effect as setting --asynchronous-upload-limit=1 but additionally wait for related uploads. The volume that is being created is not counted in the upload limit."); } }
         public static string SynchronousuploadShort { get { return LC.L(@"Upload files synchronously"); } }
         public static string NoconnectionreuseLong { get { return LC.L(@"Duplicati will attempt to perform multiple operations on a single connection, as this avoids repeated login attempts, and thus speeds up the process. Use this option to ensure that each operation is performed on a seperate connection."); } }
         public static string NoconnectionreuseShort { get { return LC.L(@"Do not re-use connections"); } }
@@ -321,6 +324,25 @@ namespace Duplicati.Library.Main.Strings
 
         public static string CPUIntensityShort { get { return LC.L("CPU intensity level"); } }
         public static string CPUIntensityLong { get { return LC.L("Set the CPU intensity level to limit CPU resource utilization. A higher number translates into a higher utilization budget. E.g. 10 would mean no restrictions. Must be an integer between 1-10."); } }
+
+        public static string RestoreCacheMaxShort { get { return LC.L("Maximum cache size for restoring files"); } }
+        public static string RestoreCacheMaxLong { get { return LC.L($"Use this option to set the maximum size of the cache used for restoring files. The cache is used to store the data blocks that are downloaded from the remote storage. It assumes that the value is divisable by the block size, except for when it is 0, which disables the block cache."); } }
+        public static string RestoreCacheEvictShort { get { return LC.L("Eviction ratio of the data block cache during restore"); } }
+        public static string RestoreCacheEvictLong { get { return LC.L("Use this option to set the eviction ratio of the data block cache during restore. The eviction ratio is the percentage of the cache that is evicted when the cache is full. The default value is 50, which means that 50% of the cache is evicted when the cache is full."); } }
+        public static string RestoreFileprocessorsShort { get { return LC.L("Number of concurrent FileProcessors processes used during restore"); } }
+        public static string RestoreFileprocessorsLong { get { return LC.L("Use this option to set the number of concurrent FileProcessors processes used during restore. A FileProcessor processes one file at a time, and increasing the number of FileProcessors may improve restore performance."); } }
+        public static string RestoreLegacyShort { get { return LC.L("Use legacy restore method"); } }
+        public static string RestoreLegacyLong { get { return LC.L("Use this option to use the legacy restore method. The legacy restore method is slower than the new method, but may be more reliable in some cases."); } }
+        public static string RestorePreallocateSizeShort { get { return LC.L("Preallocate size of restored files"); } }
+        public static string RestorePreallocateSizeLong { get { return LC.L("Use this option to toggle whether to set the size of the restored files before they are written to disk. This can help to reduce fragmentation and improve performance on some filesystems."); } }
+        public static string RestoreVolumeDecompressorsShort { get { return LC.L("Number of concurrent FileDecompressor processes used during restore"); } }
+        public static string RestoreVolumeDecompressorsLong { get { return LC.L("Use this option to set the number of concurrent FileDecompressor processes used during restore. A FileDecompressor processes one volume at a time, and increasing the number of FileDecompressors may improve restore performance if the bottleneck is decompression."); } }
+        public static string RestoreVolumeDecryptorsShort { get { return LC.L("Number of concurrent FileDecryptor processes used during restore"); } }
+        public static string RestoreVolumeDecryptorsLong { get { return LC.L("Use this option to set the number of concurrent FileDecryptor processes used during restore. A FileDecryptor processes one volume at a time, and increasing the number of FileDecryptors may improve restore performance if the bottleneck is decryption."); } }
+        public static string RestoreVolumeDownloadersShort { get { return LC.L("Number of concurrent FileDownloader processes used during restore"); } }
+        public static string RestoreVolumeDownloadersLong { get { return LC.L("Use this option to set the number of concurrent FileDownloader processes used during restore. A FileDownloader processes one volume at a time, and increasing the number of FileDownloaders may improve restore performance if the bottleneck is downloading."); } }
+        public static string InternalProfilingShort { get { return LC.L("Enable internal profiling"); } }
+        public static string InternalProfilingLong { get { return LC.L("Use this option to enable internal profiling. Profiling is used to measure the performance of the internal code. The profiling data is written to the log file and can be used to identify performance bottlenecks."); } }
     }
 
     internal static class Common

@@ -25,6 +25,7 @@ using System.Collections.Generic;
 using Duplicati.Library.Interface;
 using Duplicati.Library.Utility;
 using System.Globalization;
+using System.Threading;
 
 namespace Duplicati.Library.Main
 {
@@ -74,6 +75,11 @@ namespace Duplicati.Library.Main
         private const string DEFAULT_LOG_RETENTION = "30D";
 
         /// <summary>
+        /// The default activity timeout
+        /// </summary>
+        private const string DEFAULT_READ_WRITE_TIMEOUT = "30s";
+
+        /// <summary>
         /// The default number of compressor instances
         /// </summary>
         private readonly int DEFAULT_COMPRESSORS = Math.Max(1, Environment.ProcessorCount / 2);
@@ -87,6 +93,36 @@ namespace Duplicati.Library.Main
         /// The default threshold for warning about coming close to quota
         /// </summary>
         private const int DEFAULT_QUOTA_WARNING_THRESHOLD = 10;
+
+        /// <summary>
+        /// The default value for the maximum size of the restore cache
+        /// </summary>
+        private const string DEFAULT_RESTORE_CACHE_MAX = "4gb";
+
+        /// <summary>
+        /// The default value for the percentage of the restore cache to evict when full
+        /// </summary>
+        private const int DEFAULT_RESTORE_CACHE_EVICT = 50;
+
+        /// <summary>
+        /// The default value for the number of file processors during restore
+        /// </summary>
+        private readonly int DEFAULT_RESTORE_FILE_PROCESSORS = Math.Max(1, Environment.ProcessorCount / 2);
+
+        /// <summary>
+        /// The default value for the number of volume decryptors during restore
+        /// </summary>
+        private readonly int DEFAULT_RESTORE_VOLUME_DECRYPTORS = Math.Max(1, Environment.ProcessorCount / 2);
+
+        /// <summary>
+        /// The default value for the number of volume decompressors during restore
+        /// </summary>
+        private readonly int DEFAULT_RESTORE_VOLUME_DECOMPRESSORS = Math.Max(1, Environment.ProcessorCount / 2);
+
+        /// <summary>
+        /// The default value for the number of volume downloaders during restore
+        /// </summary>
+        private readonly int DEFAULT_RESTORE_VOLUME_DOWNLOADERS = Math.Max(1, Environment.ProcessorCount / 2);
 
         /// <summary>
         /// An enumeration that describes the supported strategies for an optimization
@@ -278,7 +314,7 @@ namespace Duplicati.Library.Main
                     new CommandLineArgument("disable-time-tolerance", CommandLineArgument.ArgumentType.Boolean, Strings.Options.DisabletimetoleranceShort, Strings.Options.DisabletimetoleranceLong, "false"),
 
                     new CommandLineArgument("tempdir", CommandLineArgument.ArgumentType.Path, Strings.Options.TempdirShort, Strings.Options.TempdirLong, System.IO.Path.GetTempPath()),
-                    new CommandLineArgument("thread-priority", CommandLineArgument.ArgumentType.Enumeration, Strings.Options.ThreadpriorityShort, Strings.Options.ThreadpriorityLong, "normal", null, new string[] {"highest", "high", "abovenormal", "normal", "belownormal", "low", "lowest", "idle" }),
+                    new CommandLineArgument("thread-priority", CommandLineArgument.ArgumentType.Enumeration, Strings.Options.ThreadpriorityShort, Strings.Options.ThreadpriorityLong, "normal", null, new string[] {"highest", "high", "abovenormal", "normal", "belownormal", "low", "lowest", "idle" }, Strings.Options.ThreadpriorityDeprecated),
 
                     new CommandLineArgument("prefix", CommandLineArgument.ArgumentType.String, Strings.Options.PrefixShort, Strings.Options.PrefixLong, "duplicati"),
 
@@ -295,6 +331,7 @@ namespace Duplicati.Library.Main
                     new CommandLineArgument("asynchronous-upload-folder", CommandLineArgument.ArgumentType.Path, Strings.Options.AsynchronousuploadfolderShort, Strings.Options.AsynchronousuploadfolderLong, System.IO.Path.GetTempPath()),
 
                     new CommandLineArgument("disable-streaming-transfers", CommandLineArgument.ArgumentType.Boolean, Strings.Options.DisableStreamingShort, Strings.Options.DisableStreamingLong, "false"),
+                    new CommandLineArgument("read-write-timeout", CommandLineArgument.ArgumentType.Timespan, Strings.Options.ReadWriteTimeoutShort, Strings.Options.ReadWriteTimeoutLong, DEFAULT_READ_WRITE_TIMEOUT),
 
                     new CommandLineArgument("throttle-upload", CommandLineArgument.ArgumentType.Size, Strings.Options.ThrottleuploadShort, Strings.Options.ThrottleuploadLong, "0kb"),
                     new CommandLineArgument("throttle-download", CommandLineArgument.ArgumentType.Size, Strings.Options.ThrottledownloadShort, Strings.Options.ThrottledownloadLong, "0kb"),
@@ -421,6 +458,16 @@ namespace Duplicati.Library.Main
                     new CommandLineArgument("secret-provider-pattern", CommandLineArgument.ArgumentType.String, Strings.Options.SecretProviderPatternShort, Strings.Options.SecretProviderPatternLong, SecretProviderHelper.DEFAULT_PATTERN),
                     new CommandLineArgument("secret-provider-cache", CommandLineArgument.ArgumentType.Enumeration, Strings.Options.SecretProviderCacheShort, Strings.Options.SecretProviderCacheLong, Enum.GetName(SecretProviderHelper.CachingLevel.None), null, Enum.GetNames(typeof(SecretProviderHelper.CachingLevel))),
                     new CommandLineArgument("cpu-intensity", CommandLineArgument.ArgumentType.Integer, Strings.Options.CPUIntensityShort, Strings.Options.CPUIntensityLong, "10", null, ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]),
+
+                    new CommandLineArgument("restore-cache-max", CommandLineArgument.ArgumentType.Size, Strings.Options.RestoreCacheMaxShort, Strings.Options.RestoreCacheMaxLong, DEFAULT_RESTORE_CACHE_MAX),
+                    new CommandLineArgument("restore-cache-evict", CommandLineArgument.ArgumentType.Integer, Strings.Options.RestoreCacheEvictShort, Strings.Options.RestoreCacheEvictLong, DEFAULT_RESTORE_CACHE_EVICT.ToString()),
+                    new CommandLineArgument("restore-file-processors", CommandLineArgument.ArgumentType.Integer, Strings.Options.RestoreFileprocessorsShort, Strings.Options.RestoreFileprocessorsLong, DEFAULT_RESTORE_FILE_PROCESSORS.ToString()),
+                    new CommandLineArgument("restore-legacy", CommandLineArgument.ArgumentType.Boolean, Strings.Options.RestoreLegacyShort, Strings.Options.RestoreLegacyLong, "false"),
+                    new CommandLineArgument("restore-preallocate-size", CommandLineArgument.ArgumentType.Boolean, Strings.Options.RestorePreallocateSizeShort, Strings.Options.RestorePreallocateSizeLong, "false"),
+                    new CommandLineArgument("restore-volume-decompressors", CommandLineArgument.ArgumentType.Integer, Strings.Options.RestoreVolumeDecompressorsShort, Strings.Options.RestoreVolumeDecompressorsLong, DEFAULT_RESTORE_VOLUME_DECOMPRESSORS.ToString()),
+                    new CommandLineArgument("restore-volume-decryptors", CommandLineArgument.ArgumentType.Integer, Strings.Options.RestoreVolumeDecryptorsShort, Strings.Options.RestoreVolumeDecryptorsLong, DEFAULT_RESTORE_VOLUME_DECRYPTORS.ToString()),
+                    new CommandLineArgument("restore-volume-downloaders", CommandLineArgument.ArgumentType.Integer, Strings.Options.RestoreVolumeDownloadersShort, Strings.Options.RestoreVolumeDownloadersLong, DEFAULT_RESTORE_VOLUME_DOWNLOADERS.ToString()),
+                    new CommandLineArgument("internal-profiling", CommandLineArgument.ArgumentType.Boolean, Strings.Options.InternalProfilingShort, Strings.Options.InternalProfilingLong, "false"),
                 });
 
                 return lst;
@@ -635,20 +682,6 @@ namespace Duplicati.Library.Main
         }
 
         /// <summary>
-        /// Gets the process priority
-        /// </summary>
-        public string ThreadPriority
-        {
-            get
-            {
-                if (!m_options.ContainsKey("thread-priority") || string.IsNullOrEmpty(m_options["thread-priority"]))
-                    return null;
-                else
-                    return m_options["thread-priority"];
-            }
-        }
-
-        /// <summary>
         /// A value indicating if missing folders should be created automatically
         /// </summary>
         public bool AutocreateFolders { get { return !GetBool("disable-autocreate-folder"); } }
@@ -826,6 +859,26 @@ namespace Duplicati.Library.Main
         /// A value indicating if use of the streaming interface is disallowed
         /// </summary>
         public bool DisableStreamingTransfers { get { return GetBool("disable-streaming-transfers"); } }
+
+        /// <summary>
+        /// The maximum time to allow inactivity before a connection is closed.
+        /// Returns <c>Timeout.Infinite</c> if disabled.
+        /// </summary>
+        public int ReadWriteTimeout
+        {
+            get
+            {
+                var v = m_options.GetValueOrDefault("read-write-timeout");
+                if (string.IsNullOrWhiteSpace(v))
+                    v = DEFAULT_READ_WRITE_TIMEOUT;
+
+                var res = Library.Utility.Timeparser.ParseTimeSpan(v);
+                if (res.Ticks <= 0)
+                    return Timeout.Infinite;
+
+                return (int)res.TotalMilliseconds;
+            }
+        }
 
         /// <summary>
         /// Gets the delay period to retry uploads
@@ -1976,6 +2029,149 @@ namespace Duplicati.Library.Main
         private bool GetBool(string name)
         {
             return Library.Utility.Utility.ParseBoolOption(m_options, name);
+        }
+
+        /// <summary>
+        /// Gets the maximum number of data blocks to keep in the cache. If set to 0, the cache is disabled.
+        /// </summary>
+        public long RestoreCacheMax
+        {
+            get
+            {
+                if (!m_options.TryGetValue("restore-cache-max", out string v))
+                    v = DEFAULT_RESTORE_CACHE_MAX;
+
+                long max_cache = Sizeparser.ParseSize(v, "mb");
+
+                if (max_cache > 0 && max_cache < Blocksize)
+                    throw new ArgumentOutOfRangeException(nameof(max_cache), string.Format("The maximum cache size cannot be less than the blocksize if not explicitly 0: {0} < {1}", max_cache, Blocksize));
+
+                return max_cache;
+            }
+        }
+
+        /// <summary>
+        /// Gets the ratio of cache entries to evict when the cache is full
+        /// </summary>
+        public float RestoreCacheEvict
+        {
+            get
+            {
+                m_options.TryGetValue("restore-cache-evict", out string s);
+                if (string.IsNullOrEmpty(s))
+                {
+                    return DEFAULT_RESTORE_CACHE_EVICT / 100f;
+                }
+
+                int percentage;
+                try
+                {
+                    percentage = int.Parse(s, CultureInfo.InvariantCulture);
+                }
+                catch (Exception ex)
+                {
+                    throw new ArgumentException("The value provided for the restore-cache-evict option must lie between 0 and 100", ex);
+                }
+
+                if ((percentage < 0) || (percentage > 100))
+                {
+                    throw new ArgumentOutOfRangeException(nameof(percentage), "The value provided for the restore-cache-evict option must lie between 0 and 100");
+                }
+
+                return percentage / 100f;
+            }
+        }
+
+        /// <summary>
+        /// Gets the number of file processors to use in the restore process
+        /// </summary>
+        public int RestoreFileProcessors
+        {
+            get
+            {
+                if (!m_options.TryGetValue("restore-file-processors", out string v))
+                    v = null;
+
+                if (string.IsNullOrEmpty(v))
+                    return DEFAULT_RESTORE_FILE_PROCESSORS;
+                else
+                    return int.Parse(v);
+            }
+        }
+
+        /// <summary>
+        /// Gets whether to use the legacy restore method
+        /// </summary>
+        public bool RestoreLegacy
+        {
+            get { return Library.Utility.Utility.ParseBoolOption(m_options, "restore-legacy"); }
+        }
+
+        /// <summary>
+        /// Gets whether to preallocate files during restore
+        /// </summary>
+        public bool RestorePreAllocate
+        {
+            get { return Library.Utility.Utility.ParseBoolOption(m_options, "restore-pre-allocate"); }
+        }
+
+        /// <summary>
+        /// Gets the number of volume decryptors to use in the restore process
+        /// </summary>
+        public int RestoreVolumeDecryptors
+        {
+            get
+            {
+                if (!m_options.TryGetValue("restore-volume-decryptors", out string v))
+                    v = null;
+
+                if (string.IsNullOrEmpty(v))
+                    return DEFAULT_RESTORE_VOLUME_DECRYPTORS;
+                else
+                    return int.Parse(v);
+            }
+        }
+
+        /// <summary>
+        /// Gets the number of volume decompressors to use in the restore process
+        /// </summary>
+        public int RestoreVolumeDecompressors
+        {
+            get
+            {
+                if (!m_options.TryGetValue("restore-volume-decompressors", out string v))
+                    v = null;
+
+                if (string.IsNullOrEmpty(v))
+                    return DEFAULT_RESTORE_VOLUME_DECOMPRESSORS;
+                else
+                    return int.Parse(v);
+            }
+        }
+
+        /// <summary>
+        /// Gets the number of volume downloaders to use in the restore process
+        /// </summary>
+        public int RestoreVolumeDownloaders
+        {
+            get
+            {
+                if (!m_options.TryGetValue("restore-volume-downloaders", out string v))
+                    v = null;
+
+                if (string.IsNullOrEmpty(v))
+                    return DEFAULT_RESTORE_VOLUME_DOWNLOADERS;
+                else
+                    return int.Parse(v);
+            }
+        }
+
+        /// <summary>
+        /// Toggles whether internal profiling is enabled and should be logged.
+        /// </summary>
+        public bool InternalProfiling
+        {
+            get { return Library.Utility.Utility.ParseBoolOption(m_options, "internal-profiling"); }
         }
 
         /// <summary>

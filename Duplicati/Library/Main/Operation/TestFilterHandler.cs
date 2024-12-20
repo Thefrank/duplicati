@@ -1,29 +1,29 @@
 // Copyright (C) 2024, The Duplicati Team
 // https://duplicati.com, hello@duplicati.com
-// 
-// Permission is hereby granted, free of charge, to any person obtaining a 
-// copy of this software and associated documentation files (the "Software"), 
-// to deal in the Software without restriction, including without limitation 
-// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
-// and/or sell copies of the Software, and to permit persons to whom the 
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
-// The above copyright notice and this permission notice shall be included in 
+//
+// The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-// 
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
-// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
 using System;
 using System.IO;
-using System.Threading;
 using Duplicati.Library.Snapshots;
 using CoCoL;
+using System.Threading.Tasks;
 
 namespace Duplicati.Library.Main.Operation
 {
@@ -43,23 +43,26 @@ namespace Duplicati.Library.Main.Operation
             m_result = results;
         }
 
-        public void Run(string[] sources, Library.Utility.IFilter filter, CancellationToken token)
+        public async Task RunAsync(string[] sources, Library.Utility.IFilter filter)
         {
             var sourcefilter = new Library.Utility.FilterExpression(sources, true);
+            var stopToken = m_result.TaskControl.ProgressToken;
 
             using (var snapshot = BackupHandler.GetSnapshot(sources, m_options))
-            using (new IsolatedChannelScope())
             {
-                var source = Operation.Backup.FileEnumerationProcess.Run(sources, snapshot, null,
+                Backup.Channels channels = new();
+                var source = Backup.FileEnumerationProcess.Run(channels, sources, snapshot, null,
                     m_options.FileAttributeFilter, sourcefilter, filter, m_options.SymlinkPolicy,
                     m_options.HardlinkPolicy, m_options.ExcludeEmptyFolders, m_options.IgnoreFilenames,
-                    BackupHandler.GetBlacklistedPaths(m_options), null, m_result.TaskReader, token);
+                    BackupHandler.GetBlacklistedPaths(m_options), null, m_result.TaskControl, null, stopToken);
 
-                var sink = CoCoL.AutomationExtensions.RunTask(
-                    new { source = Operation.Backup.Channels.SourcePaths.ForRead },
+                var sink = CoCoL.AutomationExtensions.RunTask(new
+                {
+                    source = channels.SourcePaths.AsRead()
+                },
                     async self =>
                     {
-                        while (true)
+                        while (await m_result.TaskControl.ProgressRendevouz().ConfigureAwait(false))
                         {
                             var path = await self.source.ReadAsync();
                             var fa = FileAttributes.Normal;
@@ -115,7 +118,7 @@ namespace Duplicati.Library.Main.Operation
                     }
                 );
 
-                System.Threading.Tasks.Task.WhenAll(source, sink).WaitForTaskOrThrow();
+                await Task.WhenAll(source, sink).ConfigureAwait(false);
             }
         }
 

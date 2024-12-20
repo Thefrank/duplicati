@@ -1,22 +1,22 @@
 // Copyright (C) 2024, The Duplicati Team
 // https://duplicati.com, hello@duplicati.com
-// 
-// Permission is hereby granted, free of charge, to any person obtaining a 
-// copy of this software and associated documentation files (the "Software"), 
-// to deal in the Software without restriction, including without limitation 
-// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
-// and/or sell copies of the Software, and to permit persons to whom the 
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
-// The above copyright notice and this permission notice shall be included in 
+//
+// The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-// 
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
-// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 using System;
 using System.Collections.Generic;
@@ -25,7 +25,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Duplicati.Library.Interface;
-using Duplicati.Library.Logging;
 using Duplicati.Library.Main;
 using Duplicati.Library.Main.Database;
 using Duplicati.Library.Main.Volumes;
@@ -55,27 +54,31 @@ namespace Duplicati.UnitTest
         {
             this.ModifySourceFiles();
 
+            var stopped = new TaskCompletionSource<bool>();
+            controller.OnOperationStarted = r =>
+            {
+                var pv = r as ITaskControlProvider;
+                if (pv == null)
+                    throw new Exception("Task control provider not found");
+#if DEBUG
+                pv.TaskControl.TestMethodCallback = (path) =>
+                {
+                    if (path.EndsWith(this.fileSizes[2] + "MB"))
+                    {
+                        stopped.TrySetResult(true);
+                        controller.Stop();
+                    }
+                };
+#endif
+            };
+
             // ReSharper disable once AccessToDisposedClosure
             Task<IBackupResults> backupTask = Task.Run(() => controller.Backup(new[] { this.DATAFOLDER }));
 
-            IBackupResults taskControl = null;
-            // Wait for the controller to have the task associated
-            while (!backupTask.IsCompleted)
-            {
-                taskControl = controller.GetType().GetField("m_currentTask", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(controller) as IBackupResults;
-                if (taskControl != null)
-                    break;
-                Thread.Sleep(100);
-            }
-
-            // Wait for the first file to be processed
-            while (!backupTask.IsCompleted && taskControl.ExaminedFiles == 0)
-                Thread.Sleep(100);
-
-            if (backupTask.IsCompleted)
+            var t = await Task.WhenAny(backupTask, stopped.Task).ConfigureAwait(false);
+            if (t != stopped.Task)
                 throw new Exception("Backup task completed before we could stop it");
 
-            controller.Stop(true);
             return await backupTask.ConfigureAwait(false);
         }
 
@@ -89,13 +92,17 @@ namespace Duplicati.UnitTest
         [Category("Disruption")]
         public async Task FilesetFiles()
         {
+#if !DEBUG
+            Assert.Ignore("This test requires DEBUG to be defined");
+#endif
             // Choose a dblock size that is small enough so that more than one volume is needed.
             Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions)
             {
                 ["dblock-size"] = "10mb",
 
                 // This allows us to inspect the dlist files without needing the BackendManager (which is inaccessible here) to decrypt them.
-                ["no-encryption"] = "true"
+                ["no-encryption"] = "true",
+                ["disable-file-scanner"] = "true"
             };
 
             // Run a full backup.
@@ -143,7 +150,7 @@ namespace Duplicati.UnitTest
             Dictionary<DateTime, int> backupTypeMap;
             using (Controller c = new Controller("file://" + this.TARGETFOLDER, options, null))
             {
-                IPurgeFilesResults purgeResults = c.PurgeFiles(new Library.Utility.FilterExpression($"*{this.fileSizes[0]}*"));
+                IPurgeFilesResults purgeResults = c.PurgeFiles(new Library.Utility.FilterExpression($"{this.DATAFOLDER}/*{this.fileSizes[0]}*"));
                 Assert.AreEqual(0, purgeResults.Errors.Count());
                 Assert.AreEqual(0, purgeResults.Warnings.Count());
 
@@ -191,8 +198,16 @@ namespace Duplicati.UnitTest
         [Category("Disruption")]
         public async Task KeepTimeRetention()
         {
+#if !DEBUG
+            Assert.Ignore("This test requires DEBUG to be defined");
+#endif
+
             // Choose a dblock size that is small enough so that more than one volume is needed.
-            Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions) { ["dblock-size"] = "10mb" };
+            Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions)
+            {
+                ["dblock-size"] = "10mb",
+                ["disable-file-scanner"] = "true"
+            };
 
             // First, run two complete backups followed by a partial backup. We will then set the keep-time
             // option so that the threshold lies between the first and second backups.
@@ -276,8 +291,16 @@ namespace Duplicati.UnitTest
         [Category("Disruption")]
         public async Task KeepVersionsRetention()
         {
+#if !DEBUG
+            Assert.Ignore("This test requires DEBUG to be defined");
+#endif
+
             // Choose a dblock size that is small enough so that more than one volume is needed.
-            Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions) { ["dblock-size"] = "10mb" };
+            Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions)
+            {
+                ["dblock-size"] = "10mb",
+                ["disable-file-scanner"] = "true",
+            };
 
             // Run a full backup.
             DateTime firstBackupTime;
@@ -325,6 +348,9 @@ namespace Duplicati.UnitTest
                 Assert.AreEqual(1, backupResults.Warnings.Count());
                 DateTime fifthBackupTime = c.List().Filesets.First().Time;
 
+                // Since we stopped the operation, files were not deleted automatically
+                c.Delete();
+
                 // Partial backups that are followed by a full backup can be deleted.
                 List<IListResultFileset> filesets = c.List().Filesets.ToList();
                 Assert.AreEqual(3, filesets.Count);
@@ -359,11 +385,16 @@ namespace Duplicati.UnitTest
         [Category("Disruption")]
         public async Task ListWithoutLocalDb()
         {
+#if !DEBUG
+            Assert.Ignore("This test requires DEBUG to be defined");
+#endif
+
             // Choose a dblock size that is small enough so that more than one volume is needed.
             Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions)
             {
                 ["dblock-size"] = "10mb",
-                ["no-local-db"] = "true"
+                ["no-local-db"] = "true",
+                ["disable-file-scanner"] = "true"
             };
 
             // Run a full backup.
@@ -392,6 +423,10 @@ namespace Duplicati.UnitTest
         [Category("Disruption")]
         public async Task RetentionPolicyRetention()
         {
+#if !DEBUG
+            Assert.Ignore("This test requires DEBUG to be defined");
+#endif
+
             Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions)
             {
                 // Choose a dblock size that is small enough so that more than one volume is needed.
@@ -399,7 +434,8 @@ namespace Duplicati.UnitTest
 
                 // This test assumes that we can perform 3 backups within 1 minute.
                 ["retention-policy"] = "1m:59s,U:1m",
-                ["no-backend-verification"] = "true"
+                ["no-backend-verification"] = "true",
+                ["disable-file-scanner"] = "true"
             };
 
             DateTime firstBackupTime;
@@ -439,6 +475,9 @@ namespace Duplicati.UnitTest
                 Assert.AreEqual(0, backupResults.Errors.Count());
                 Assert.AreEqual(1, backupResults.Warnings.Count());
                 thirdBackupTime = c.List().Filesets.First().Time;
+
+                // Since we stopped the backup, files were not deleted automatically
+                c.Delete();
 
                 // Since the most recent backup is not considered in the retention logic, there are no backups in the first time
                 // frame. The original 2 backups have now spilled over to the U:1m specification. Since we keep the first
@@ -525,8 +564,16 @@ namespace Duplicati.UnitTest
         [Category("Disruption")]
         public async Task StopAfterCurrentFile()
         {
-            // Choose a dblock size that is small enough so that more than one volume is needed.
-            Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions) { ["dblock-size"] = "10mb" };
+#if !DEBUG
+            Assert.Ignore("This test requires DEBUG to be defined");
+#endif
+
+            Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions)
+            {
+                // Choose a dblock size that is small enough so that more than one volume is needed.
+                ["dblock-size"] = "10mb",
+                ["disable-file-scanner"] = "true",
+            };
 
             // Run a complete backup.
             using (Controller c = new Controller("file://" + this.TARGETFOLDER, options, null))
@@ -545,6 +592,8 @@ namespace Duplicati.UnitTest
                 IBackupResults backupResults = await this.RunPartialBackup(c).ConfigureAwait(false);
                 Assert.AreEqual(0, backupResults.Errors.Count());
                 Assert.AreEqual(1, backupResults.Warnings.Count());
+                Assert.That(backupResults.ModifiedFiles, Is.GreaterThan(0), "No files were added, likely the stop was issued too early");
+                Assert.That(backupResults.ModifiedFiles, Is.LessThan(fileSizes.Length), "All files were added, likely the stop was issued too late");
 
                 // If we interrupt the backup, the most recent Fileset should be marked as partial.
                 Assert.AreEqual(2, c.List().Filesets.Count());
@@ -618,8 +667,17 @@ namespace Duplicati.UnitTest
         [Category("Disruption")]
         public async Task StopNow()
         {
+#if !DEBUG
+            Assert.Ignore("This test requires DEBUG to be defined");
+#endif
+
             // Choose a dblock size that is small enough so that more than one volume is needed.
-            Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions) { ["dblock-size"] = "10mb", ["disable-synthetic-filelist"] = "true" };
+            Dictionary<string, string> options = new Dictionary<string, string>(this.TestOptions)
+            {
+                ["dblock-size"] = "10mb",
+                ["disable-synthetic-filelist"] = "true",
+                ["disable-file-scanner"] = "true"
+            };
 
             // Run a complete backup.
             using (Controller c = new Controller("file://" + this.TARGETFOLDER, options, null))
@@ -633,7 +691,7 @@ namespace Duplicati.UnitTest
                 Assert.AreEqual(BackupType.FULL_BACKUP, filesets[0].IsFullBackup);
             }
 
-            // Interrupt a backup with "stop now".
+            // Interrupt a backup with "abort".
             this.ModifySourceFiles();
             using (Controller c = new Controller("file://" + this.TARGETFOLDER, options, null))
             {
@@ -644,8 +702,14 @@ namespace Duplicati.UnitTest
                 // with the Controller. Otherwise, the call to Stop will simply be a no-op.
                 Thread.Sleep(1000);
 
-                c.Stop(false);
-                await backupTask.ConfigureAwait(false);
+                c.Abort();
+                try
+                {
+                    await backupTask.ConfigureAwait(false);
+                }
+                catch (TaskCanceledException)
+                {
+                }
             }
 
             // The next backup should proceed without issues.

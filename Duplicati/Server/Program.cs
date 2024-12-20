@@ -30,6 +30,7 @@ using Duplicati.Library.Common.IO;
 using Duplicati.Library.Crashlog;
 using Duplicati.Library.Encryption;
 using Duplicati.Library.Interface;
+using Duplicati.Library.Logging;
 using Duplicati.Library.Main;
 using Duplicati.Library.Main.Database;
 using Duplicati.Library.RestAPI;
@@ -283,7 +284,7 @@ namespace Duplicati.Server
 
                 SetPurgeTempFilesTimer(commandlineOptions);
 
-                SetLiveControls();
+                LiveControl.StateChanged = LiveControl_StateChanged;
 
                 SetWorkerThread();
 
@@ -348,6 +349,8 @@ namespace Duplicati.Server
             }
             finally
             {
+                Library.Logging.Log.WriteInformationMessage(LOGTAG, "ServerStopping", Strings.Program.ServerStopping);
+
                 var steps = new Action[] {
                     () => StatusEventNotifyer.SignalNewEvent(),
                     () => { if (ShutdownModernWebserver != null) ShutdownModernWebserver(); },
@@ -358,7 +361,11 @@ namespace Duplicati.Server
                     () => PurgeTempFilesTimer?.Dispose(),
                     () => Library.UsageReporter.Reporter.ShutDown(),
                     () => PingPongThread?.Interrupt(),
-                    () => LogHandler?.Dispose()
+                    () =>
+                    {
+                        Library.Logging.Log.WriteInformationMessage(LOGTAG, "ServerStopped", Strings.Program.ServerStopped);
+                        LogHandler?.Dispose();
+                    }
                 };
 
                 foreach (var teardownStep in steps)
@@ -461,13 +468,6 @@ namespace Duplicati.Server
             FIXMEGlobal.WorkThread.OnError += (worker, task, exception) => { RegisterTaskResult(task.TaskID, exception); };
         }
 
-        private static void SetLiveControls()
-        {
-            LiveControl.StateChanged += LiveControl_StateChanged;
-            LiveControl.ThreadPriorityChanged += LiveControl_ThreadPriorityChanged;
-            LiveControl.ThrottleSpeedChanged += LiveControl_ThrottleSpeedChanged;
-        }
-
         private static void SetPurgeTempFilesTimer(Dictionary<string, string> commandlineOptions)
         {
             var lastPurge = new DateTime(0);
@@ -532,6 +532,9 @@ namespace Duplicati.Server
                 // Clean up stored tokens as they are now invalid
                 DataConnection.ExecuteWithCommand((con) => con.ExecuteNonQuery("DELETE FROM TokenFamily"));
             }
+
+            if (Library.Utility.Utility.ParseBoolOption(commandlineOptions, WebServerLoader.OPTION_WEBSERVICE_ENABLE_FOREVER_TOKEN))
+                DataConnection.ApplicationSettings.EnableForeverTokens();
 
             if (commandlineOptions.ContainsKey(WebServerLoader.OPTION_WEBSERVICE_DISABLE_VISUAL_CAPTCHA))
                 DataConnection.ApplicationSettings.DisableVisualCaptcha = Library.Utility.Utility.ParseBool(commandlineOptions[WebServerLoader.OPTION_WEBSERVICE_DISABLE_VISUAL_CAPTCHA], true);
@@ -659,17 +662,29 @@ namespace Duplicati.Server
                 {
                     Library.Logging.Log.WriteWarningMessage(LOGTAG, "WindowsLogNotSupported", null, Strings.Program.WindowsEventLogNotSupported);
                 }
-                else if (!WindowsEventLogSource.SourceExists(source))
-                {
-                    Library.Logging.Log.WriteWarningMessage(LOGTAG, "WindowsLogMissing", null, Strings.Program.WindowsEventLogSourceNotFound(source));
-                }
                 else
                 {
-                    var loglevel = Library.Logging.LogMessageType.Information;
-                    if (commandlineOptions.ContainsKey(WINDOWS_EVENTLOG_LEVEL_OPTION))
-                        Enum.TryParse(commandlineOptions[WINDOWS_EVENTLOG_LEVEL_OPTION], true, out loglevel);
+                    if (!WindowsEventLogSource.SourceExists(source))
+                    {
+                        Library.Logging.Log.WriteInformationMessage(LOGTAG, "WindowsLogMissingCreating", null, Strings.Program.WindowsEventLogSourceNotFound(source));
+                        try
+                        {
+                            WindowsEventLogSource.CreateEventSource(source);
+                        }
+                        catch (Exception ex)
+                        {
+                            Library.Logging.Log.WriteWarningMessage(LOGTAG, "WindowsLogFailedCreate", ex, Strings.Program.WindowsEventLogSourceNotCreated(source));
+                        }
+                    }
 
-                    LogHandler.AppendLogDestination(new WindowsEventLogSource(source), loglevel);
+                    if (WindowsEventLogSource.SourceExists(source))
+                    {
+                        var loglevel = Library.Logging.LogMessageType.Information;
+                        if (commandlineOptions.ContainsKey(WINDOWS_EVENTLOG_LEVEL_OPTION))
+                            Enum.TryParse(commandlineOptions[WINDOWS_EVENTLOG_LEVEL_OPTION], true, out loglevel);
+
+                        LogHandler.AppendLogDestination(new WindowsEventLogSource(source), loglevel);
+                    }
                 }
             }
 
@@ -836,53 +851,36 @@ namespace Duplicati.Server
         }
 
         /// <summary>
-        /// Handles a change in the LiveControl and updates the Runner
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private static void LiveControl_ThreadPriorityChanged(object sender, EventArgs e)
-        {
-            StatusEventNotifyer.SignalNewEvent();
-        }
-
-        /// <summary>
-        /// Handles a change in the LiveControl and updates the Runner
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private static void LiveControl_ThrottleSpeedChanged(object sender, EventArgs e)
-        {
-            StatusEventNotifyer.SignalNewEvent();
-        }
-
-        /// <summary>
         /// This event handler updates the trayicon menu with the current state of the runner.
         /// </summary>
         /// <exception cref="ArgumentOutOfRangeException"></exception>
-        private static void LiveControl_StateChanged(object sender, EventArgs e)
+        private static void LiveControl_StateChanged(LiveControls.LiveControlEvent e)
         {
             var worker = FIXMEGlobal.WorkThread;
-            switch (LiveControl.State)
+            var appSettings = FIXMEGlobal.DataConnection.ApplicationSettings;
+            switch (e.State)
             {
                 case LiveControls.LiveControlState.Paused:
                     {
                         worker.Pause();
-                        var t = worker.CurrentTask;
-                        t?.Pause();
+                        worker.CurrentTask?.Pause(e.TransfersPaused);
+                        appSettings.PausedUntil = e.WaitTimeExpiration;
                         break;
                     }
                 case LiveControls.LiveControlState.Running:
                     {
                         worker.Resume();
-                        var t = worker.CurrentTask;
-                        t?.Resume();
+                        worker.CurrentTask?.Resume();
+                        appSettings.PausedUntil = null;
                         break;
                     }
                 default:
-                    throw new InvalidOperationException($"State of {nameof(LiveControl)} was not recognized!");
+                    Log.WriteWarningMessage(LOGTAG, "InvalidPauseResumeState", null, Strings.Program.InvalidPauseResumeState(LiveControl.State));
+                    break;
             }
 
             StatusEventNotifyer.SignalNewEvent();
+
         }
 
         /// <summary>
@@ -947,6 +945,7 @@ namespace Duplicati.Server
                 new Duplicati.Library.Interface.CommandLineArgument(WebServerLoader.OPTION_WEBSERVICE_PASSWORD, Duplicati.Library.Interface.CommandLineArgument.ArgumentType.Password, Strings.Program.WebserverPasswordDescription, Strings.Program.WebserverPasswordDescription),
                 new Duplicati.Library.Interface.CommandLineArgument(WebServerLoader.OPTION_WEBSERVICE_ALLOWEDHOSTNAMES, Duplicati.Library.Interface.CommandLineArgument.ArgumentType.String, Strings.Program.WebserverAllowedhostnamesDescription, Strings.Program.WebserverAllowedhostnamesDescription, null, [WebServerLoader.OPTION_WEBSERVICE_ALLOWEDHOSTNAMES_ALT]),
                 new Duplicati.Library.Interface.CommandLineArgument(WebServerLoader.OPTION_WEBSERVICE_RESET_JWT_CONFIG, Duplicati.Library.Interface.CommandLineArgument.ArgumentType.Boolean, Strings.Program.WebserverResetJwtConfigDescription, Strings.Program.WebserverResetJwtConfigDescription),
+                new Duplicati.Library.Interface.CommandLineArgument(WebServerLoader.OPTION_WEBSERVICE_ENABLE_FOREVER_TOKEN, Duplicati.Library.Interface.CommandLineArgument.ArgumentType.Boolean, Strings.Program.WebserverEnableForeverTokenDescription, Strings.Program.WebserverEnableForeverTokenDescription),
                 new Duplicati.Library.Interface.CommandLineArgument(WebServerLoader.OPTION_WEBSERVICE_DISABLE_VISUAL_CAPTCHA, Duplicati.Library.Interface.CommandLineArgument.ArgumentType.Boolean, Strings.Program.WebserverDisableVisualCaptchaDescription, Strings.Program.WebserverDisableVisualCaptchaDescription),
                 new Duplicati.Library.Interface.CommandLineArgument(WebServerLoader.OPTION_WEBSERVICE_API_ONLY, Duplicati.Library.Interface.CommandLineArgument.ArgumentType.Boolean, Strings.Program.WebserverApiOnlyDescription, Strings.Program.WebserverApiOnlyDescription),
                 new Duplicati.Library.Interface.CommandLineArgument(WebServerLoader.OPTION_WEBSERVICE_DISABLE_SIGNIN_TOKENS, Duplicati.Library.Interface.CommandLineArgument.ArgumentType.Boolean, Strings.Program.WebserverDisableSigninTokensDescription, Strings.Program.WebserverDisableSigninTokensDescription),
